@@ -14,12 +14,18 @@
     </style>
 </head>
 <body class="bg-gray-100 p-4 sm:p-8 flex items-center justify-center min-h-screen">
-
+    <!-- Main App Container -->
     <div class="w-full max-w-4xl bg-white p-6 sm:p-8 rounded-2xl shadow-xl space-y-8">
         <!-- Header -->
         <div class="text-center space-y-2">
             <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-800">나의 목표 달성 앱</h1>
             <p class="text-lg text-gray-600">목표를 12단계로 나누어 체계적으로 관리해보세요.</p>
+        </div>
+
+        <!-- User Info and Status -->
+        <div class="text-center text-sm text-gray-500">
+            <p>앱 ID: <span id="app-id"></span></p>
+            <p>사용자 ID: <span id="user-id"></span></p>
         </div>
 
         <!-- Dashboard -->
@@ -57,255 +63,367 @@
 
         <!-- Goal List -->
         <div id="goal-list" class="space-y-6">
-            <div id="empty-state" class="text-center text-gray-500 py-10 text-lg">
+            <div id="loading-state" class="text-center text-gray-500 py-10 text-lg hidden">
+                데이터를 불러오는 중입니다...
+            </div>
+            <div id="empty-state" class="text-center text-gray-500 py-10 text-lg hidden">
                 아직 목표가 없습니다. 새로운 목표를 추가해보세요!
             </div>
         </div>
     </div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const goals = [];
-            const motivationalQuotes = [
-                "시작이 반이다. 지금 바로 시작하세요!",
-                "목표를 향한 작은 한 걸음이 큰 변화를 만듭니다.",
-                "포기하지 않는 용기만이 목표를 완성시킬 수 있습니다.",
-                "오늘의 노력이 내일의 나를 만듭니다.",
-                "가능하다고 믿으면 절반은 이미 이룬 것이다.",
-            ];
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-            const overallProgressBar = document.getElementById('overall-progress-bar');
-            const overallProgressText = document.getElementById('overall-progress-text');
-            const individualProgressContainer = document.getElementById('individual-progress-container');
-            const individualProgressList = document.getElementById('individual-progress-list');
-            const goalList = document.getElementById('goal-list');
-            const newGoalInput = document.getElementById('new-goal-input');
-            const addGoalButton = document.getElementById('add-goal-button');
-            const getQuoteButton = document.getElementById('get-quote-button');
-            const quoteText = document.getElementById('quote-text');
-            const emptyState = document.getElementById('empty-state');
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
-            // Function to calculate a single goal's progress
-            function calculateGoalProgress(goal) {
-                const totalDetails = goal.steps.reduce((sum, step) => sum + step.details.length, 0);
-                if (totalDetails === 0) return 0;
-                const completedDetails = goal.steps.reduce((sum, step) =>
-                    sum + step.details.filter(detail => detail.isCompleted).length, 0);
-                return Math.floor((completedDetails / totalDetails) * 100);
-            }
+        let db;
+        let auth;
+        let userId;
 
-            // Function to update all progress bars
-            function updateProgress() {
-                const totalDetails = goals.reduce((sum, goal) =>
-                    sum + goal.steps.reduce((stepSum, step) => stepSum + step.details.length, 0), 0);
-                const totalCompletedDetails = goals.reduce((sum, goal) =>
-                    sum + goal.steps.reduce((stepSum, step) =>
-                        stepSum + step.details.filter(detail => detail.isCompleted).length, 0), 0);
-                
-                const overallProgress = totalDetails === 0 ? 0 : Math.floor((totalCompletedDetails / totalDetails) * 100);
-                
-                // Update overall progress
-                overallProgressBar.style.width = `${overallProgress}%`;
-                overallProgressText.textContent = `${overallProgress}%`;
+        const motivationalQuotes = [
+            "시작이 반이다. 지금 바로 시작하세요!",
+            "목표를 향한 작은 한 걸음이 큰 변화를 만듭니다.",
+            "포기하지 않는 용기만이 목표를 완성시킬 수 있습니다.",
+            "오늘의 노력이 내일의 나를 만듭니다.",
+            "가능하다고 믿으면 절반은 이미 이룬 것이다.",
+        ];
 
-                // Update individual progress bars
-                individualProgressList.innerHTML = '';
-                if (goals.length > 0) {
-                    individualProgressContainer.classList.remove('hidden');
-                    goals.forEach(goal => {
-                        const progress = calculateGoalProgress(goal);
-                        const goalProgressHtml = `
-                            <div class="space-y-1">
-                                <div class="flex justify-between items-center text-sm font-medium text-white text-opacity-80">
-                                    <span>${goal.name}</span>
-                                    <span>${progress}%</span>
-                                </div>
-                                <div class="h-2 bg-white bg-opacity-30 rounded-full overflow-hidden">
-                                    <div class="h-full bg-white transition-all duration-500 ease-out" style="width: ${progress}%;"></div>
-                                </div>
+        const overallProgressBar = document.getElementById('overall-progress-bar');
+        const overallProgressText = document.getElementById('overall-progress-text');
+        const individualProgressContainer = document.getElementById('individual-progress-container');
+        const individualProgressList = document.getElementById('individual-progress-list');
+        const goalList = document.getElementById('goal-list');
+        const newGoalInput = document.getElementById('new-goal-input');
+        const addGoalButton = document.getElementById('add-goal-button');
+        const getQuoteButton = document.getElementById('get-quote-button');
+        const quoteText = document.getElementById('quote-text');
+        const emptyState = document.getElementById('empty-state');
+        const loadingState = document.getElementById('loading-state');
+        const appIdElement = document.getElementById('app-id');
+        const userIdElement = document.getElementById('user-id');
+
+        // Function to calculate a single goal's progress
+        function calculateGoalProgress(goal) {
+            const totalDetails = goal.steps.reduce((sum, step) => sum + step.details.length, 0);
+            if (totalDetails === 0) return 0;
+            const completedDetails = goal.steps.reduce((sum, step) =>
+                sum + step.details.filter(detail => detail.isCompleted).length, 0);
+            return Math.floor((completedDetails / totalDetails) * 100);
+        }
+
+        // Function to update all progress bars
+        function updateProgress(goals) {
+            const totalDetails = goals.reduce((sum, goal) =>
+                sum + goal.steps.reduce((stepSum, step) => stepSum + step.details.length, 0), 0);
+            const totalCompletedDetails = goals.reduce((sum, goal) =>
+                sum + goal.steps.reduce((stepSum, step) =>
+                    stepSum + step.details.filter(detail => detail.isCompleted).length, 0), 0);
+            
+            const overallProgress = totalDetails === 0 ? 0 : Math.floor((totalCompletedDetails / totalDetails) * 100);
+            
+            // Update overall progress
+            overallProgressBar.style.width = `${overallProgress}%`;
+            overallProgressText.textContent = `${overallProgress}%`;
+
+            // Update individual progress bars
+            individualProgressList.innerHTML = '';
+            if (goals.length > 0) {
+                individualProgressContainer.classList.remove('hidden');
+                goals.forEach(goal => {
+                    const progress = calculateGoalProgress(goal);
+                    const goalProgressHtml = `
+                        <div class="space-y-1">
+                            <div class="flex justify-between items-center text-sm font-medium text-white text-opacity-80">
+                                <span>${goal.name}</span>
+                                <span>${progress}%</span>
                             </div>
-                        `;
-                        individualProgressList.insertAdjacentHTML('beforeend', goalProgressHtml);
-                    });
-                } else {
-                    individualProgressContainer.classList.add('hidden');
-                }
-            }
-
-            // Function to render a single goal element
-            function renderGoal(goal) {
-                const goalElement = document.createElement('div');
-                goalElement.id = `goal-${goal.id}`;
-                goalElement.className = 'bg-white p-6 rounded-xl shadow-lg border border-gray-200';
-                
-                // Goal Header
-                let goalHeaderHtml = `
-                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4">
-                        <h3 class="text-xl font-bold text-gray-800">
-                            목표: ${goal.name}
-                        </h3>
-                        <div class="flex space-x-2 mt-2 sm:mt-0">
-                            <button class="px-3 py-1 text-sm rounded-lg font-semibold transition-colors bg-gray-200 text-gray-700 hover:bg-gray-300 edit-goal-btn">
-                                편집
-                            </button>
-                            <button class="px-3 py-1 text-sm bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-colors delete-goal-btn">
-                                삭제
-                            </button>
-                        </div>
-                    </div>
-                    <!-- Goal Progress Bar -->
-                    <div class="mb-4">
-                        <div class="flex justify-between items-center text-sm font-medium text-gray-600 mb-1">
-                            <span>진행률</span>
-                            <span>${calculateGoalProgress(goal)}%</span>
-                        </div>
-                        <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
-                            <div class="h-full bg-blue-500 transition-all duration-500 ease-out" style="width: ${calculateGoalProgress(goal)}%;"></div>
-                        </div>
-                    </div>
-                    <!-- Steps Section -->
-                    <div class="space-y-4">
-                        <h4 class="text-lg font-semibold text-gray-700">12단계 실행 계획</h4>
-                        <div class="steps-container space-y-4"></div>
-                    </div>
-                `;
-
-                goalElement.innerHTML = goalHeaderHtml;
-                const stepsContainer = goalElement.querySelector('.steps-container');
-
-                // Render steps
-                goal.steps.forEach((step, index) => {
-                    const stepElement = document.createElement('div');
-                    stepElement.className = 'bg-gray-50 p-4 rounded-lg shadow-inner';
-                    stepElement.innerHTML = `
-                        <div class="flex justify-between items-center cursor-pointer step-header">
-                            <h5 class="text-md font-medium text-gray-700">
-                                ${index + 1}. ${step.text}
-                            </h5>
-                            <svg class="w-5 h-5 transition-transform rotate-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                            </svg>
-                        </div>
-                        <div class="step-details-container mt-4 space-y-2 border-l-2 border-blue-400 pl-4 hidden">
-                            <p class="text-sm font-semibold text-gray-600">세부 항목</p>
-                            <div class="details-list space-y-2"></div>
-                            <div class="flex mt-2 space-x-2">
-                                <input type="text" class="flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 detail-input" placeholder="새로운 세부 항목을 추가하세요...">
-                                <button class="px-3 py-1 bg-blue-500 text-white rounded-lg font-semibold text-sm hover:bg-blue-600 transition-colors add-detail-btn">
-                                    추가
-                                </button>
+                            <div class="h-2 bg-white bg-opacity-30 rounded-full overflow-hidden">
+                                <div class="h-full bg-white transition-all duration-500 ease-out" style="width: ${progress}%;"></div>
                             </div>
                         </div>
                     `;
+                    individualProgressList.insertAdjacentHTML('beforeend', goalProgressHtml);
+                });
+            } else {
+                individualProgressContainer.classList.add('hidden');
+            }
+        }
 
-                    const stepHeader = stepElement.querySelector('.step-header');
-                    const detailsContainer = stepElement.querySelector('.step-details-container');
-                    const detailsList = stepElement.querySelector('.details-list');
-                    const detailInput = stepElement.querySelector('.detail-input');
-                    const addDetailBtn = stepElement.querySelector('.add-detail-btn');
-                    const arrowIcon = stepElement.querySelector('svg');
+        // Function to render a single goal element
+        function renderGoal(goal) {
+            const goalElement = document.createElement('div');
+            goalElement.id = `goal-${goal.id}`;
+            goalElement.className = 'bg-white p-6 rounded-xl shadow-lg border border-gray-200';
+            
+            // Goal Header
+            let goalHeaderHtml = `
+                <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4">
+                    <h3 class="text-xl font-bold text-gray-800">
+                        목표: ${goal.name}
+                    </h3>
+                    <div class="flex space-x-2 mt-2 sm:mt-0">
+                        <button class="px-3 py-1 text-sm rounded-lg font-semibold transition-colors bg-gray-200 text-gray-700 hover:bg-gray-300 edit-goal-btn">
+                            편집
+                        </button>
+                        <button class="px-3 py-1 text-sm bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-colors delete-goal-btn">
+                            삭제
+                        </button>
+                    </div>
+                </div>
+                <!-- Goal Progress Bar -->
+                <div class="mb-4">
+                    <div class="flex justify-between items-center text-sm font-medium text-gray-600 mb-1">
+                        <span>진행률</span>
+                        <span>${calculateGoalProgress(goal)}%</span>
+                    </div>
+                    <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                        <div class="h-full bg-blue-500 transition-all duration-500 ease-out" style="width: ${calculateGoalProgress(goal)}%;"></div>
+                    </div>
+                </div>
+                <!-- Steps Section -->
+                <div class="space-y-4">
+                    <h4 class="text-lg font-semibold text-gray-700">12단계 실행 계획</h4>
+                    <div class="steps-container space-y-4"></div>
+                </div>
+            `;
+
+            goalElement.innerHTML = goalHeaderHtml;
+            const goalNameElement = goalElement.querySelector('h3');
+            const editButton = goalElement.querySelector('.edit-goal-btn');
+            const stepsContainer = goalElement.querySelector('.steps-container');
+
+            // Toggle goal name editing
+            editButton.addEventListener('click', async () => {
+                if (editButton.textContent === '편집') {
+                    const inputElement = document.createElement('input');
+                    inputElement.type = 'text';
+                    inputElement.className = 'flex-1 text-xl font-bold text-gray-800 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500';
+                    inputElement.value = goal.name;
                     
-                    // Render details
-                    step.details.forEach(detail => {
-                        const detailElement = document.createElement('div');
-                        detailElement.className = 'flex items-center space-x-2 text-sm';
-                        detailElement.innerHTML = `
-                            <input type="checkbox" ${detail.isCompleted ? 'checked' : ''} class="form-checkbox h-4 w-4 text-blue-500 rounded toggle-detail-checkbox">
-                            <p class="flex-1 ${detail.isCompleted ? 'line-through text-gray-500' : 'text-gray-700'}">${detail.text}</p>
-                        `;
-                        detailsList.appendChild(detailElement);
-                        
-                        // Toggle detail completion status
-                        detailElement.querySelector('.toggle-detail-checkbox').addEventListener('change', () => {
-                            detail.isCompleted = !detail.isCompleted;
-                            renderGoals(); // Rerender all goals
-                        });
-                    });
+                    goalNameElement.replaceWith(inputElement);
+                    editButton.textContent = '저장';
+                    inputElement.focus();
+                } else {
+                    const inputElement = goalElement.querySelector('input[type="text"]');
+                    const newName = inputElement.value.trim();
+                    if (newName !== '') {
+                        try {
+                            const goalDocRef = doc(db, `/artifacts/${appId}/users/${userId}/goals`, goal.id);
+                            await updateDoc(goalDocRef, { name: newName });
+                            editButton.textContent = '편집';
+                            inputElement.replaceWith(goalNameElement);
+                        } catch (e) {
+                            console.error("Error updating goal name: ", e);
+                        }
+                    }
+                }
+            });
 
-                    // Event listeners
-                    stepHeader.addEventListener('click', () => {
-                        const isVisible = detailsContainer.classList.toggle('hidden');
-                        arrowIcon.classList.toggle('rotate-180', !isVisible);
-                    });
+            // Render steps
+            goal.steps.forEach((step, index) => {
+                const stepElement = document.createElement('div');
+                stepElement.className = 'bg-gray-50 p-4 rounded-lg shadow-inner';
+                stepElement.innerHTML = `
+                    <div class="flex justify-between items-center cursor-pointer step-header">
+                        <h5 class="text-md font-medium text-gray-700">
+                            ${index + 1}. ${step.text}
+                        </h5>
+                        <svg class="w-5 h-5 transition-transform rotate-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </div>
+                    <div class="step-details-container mt-4 space-y-2 border-l-2 border-blue-400 pl-4 hidden">
+                        <p class="text-sm font-semibold text-gray-600">세부 항목</p>
+                        <div class="details-list space-y-2"></div>
+                        <div class="flex mt-2 space-x-2">
+                            <input type="text" class="flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 detail-input" placeholder="새로운 세부 항목을 추가하세요...">
+                            <button class="px-3 py-1 bg-blue-500 text-white rounded-lg font-semibold text-sm hover:bg-blue-600 transition-colors add-detail-btn">
+                                추가
+                            </button>
+                        </div>
+                    </div>
+                `;
 
-                    addDetailBtn.addEventListener('click', () => {
-                        if (detailInput.value.trim() !== '') {
-                            step.details.push({
-                                id: Date.now() + Math.random(),
-                                text: detailInput.value.trim(),
-                                isCompleted: false
+                const stepHeader = stepElement.querySelector('.step-header');
+                const detailsContainer = stepElement.querySelector('.step-details-container');
+                const detailsList = stepElement.querySelector('.details-list');
+                const detailInput = stepElement.querySelector('.detail-input');
+                const addDetailBtn = stepElement.querySelector('.add-detail-btn');
+                const arrowIcon = stepElement.querySelector('svg');
+                
+                // Render details
+                step.details.forEach(detail => {
+                    const detailElement = document.createElement('div');
+                    detailElement.className = 'flex items-center space-x-2 text-sm';
+                    detailElement.innerHTML = `
+                        <input type="checkbox" ${detail.isCompleted ? 'checked' : ''} class="form-checkbox h-4 w-4 text-blue-500 rounded toggle-detail-checkbox">
+                        <p class="flex-1 ${detail.isCompleted ? 'line-through text-gray-500' : 'text-gray-700'}">${detail.text}</p>
+                    `;
+                    detailsList.appendChild(detailElement);
+                    
+                    // Toggle detail completion status and update Firestore
+                    detailElement.querySelector('.toggle-detail-checkbox').addEventListener('change', async () => {
+                        detail.isCompleted = !detail.isCompleted;
+                        try {
+                            const goalDocRef = doc(db, `/artifacts/${appId}/users/${userId}/goals`, goal.id);
+                            await updateDoc(goalDocRef, {
+                                steps: goal.steps // Update the entire steps array
                             });
-                            detailInput.value = '';
-                            renderGoals();
+                        } catch (e) {
+                            console.error("Error updating detail status: ", e);
                         }
                     });
-
-                    stepsContainer.appendChild(stepElement);
                 });
 
-                // Event listeners for goal-level buttons
-                goalElement.querySelector('.edit-goal-btn').addEventListener('click', () => {
-                    alert('편집 기능은 현재 React 버전에서만 구현되어 있습니다.');
+                // Event listeners
+                stepHeader.addEventListener('click', () => {
+                    const isVisible = detailsContainer.classList.toggle('hidden');
+                    arrowIcon.classList.toggle('rotate-180', !isVisible);
                 });
-                goalElement.querySelector('.delete-goal-btn').addEventListener('click', () => {
-                    const goalIndex = goals.findIndex(g => g.id === goal.id);
-                    if (goalIndex !== -1) {
-                        goals.splice(goalIndex, 1);
-                        renderGoals();
+
+                addDetailBtn.addEventListener('click', async () => {
+                    if (detailInput.value.trim() !== '') {
+                        step.details.push({
+                            id: Date.now() + Math.random(),
+                            text: detailInput.value.trim(),
+                            isCompleted: false
+                        });
+                        try {
+                            const goalDocRef = doc(db, `/artifacts/${appId}/users/${userId}/goals`, goal.id);
+                            await updateDoc(goalDocRef, { steps: goal.steps });
+                            detailInput.value = '';
+                        } catch (e) {
+                            console.error("Error adding new detail: ", e);
+                        }
                     }
                 });
 
-                return goalElement;
-            }
+                stepsContainer.appendChild(stepElement);
+            });
 
-            // Main render function
-            function renderGoals() {
-                goalList.innerHTML = '';
-                if (goals.length > 0) {
-                    emptyState.classList.add('hidden');
-                    goals.forEach(goal => {
-                        goalList.appendChild(renderGoal(goal));
+            // Event listener for goal-level buttons
+            goalElement.querySelector('.delete-goal-btn').addEventListener('click', async () => {
+                try {
+                    const goalDocRef = doc(db, `/artifacts/${appId}/users/${userId}/goals`, goal.id);
+                    await deleteDoc(goalDocRef);
+                } catch (e) {
+                    console.error("Error deleting goal: ", e);
+                }
+            });
+
+            return goalElement;
+        }
+
+        // Main render function from Firestore snapshot
+        function renderGoalsFromSnapshot(snapshot) {
+            goalList.innerHTML = '';
+            const fetchedGoals = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+
+            if (fetchedGoals.length > 0) {
+                emptyState.classList.add('hidden');
+                fetchedGoals.forEach(goal => {
+                    goalList.appendChild(renderGoal(goal));
+                });
+            } else {
+                emptyState.classList.remove('hidden');
+            }
+            updateProgress(fetchedGoals);
+        }
+
+        // Initialize Firebase and set up listener
+        async function initializeAppAndAuth() {
+            try {
+                if (Object.keys(firebaseConfig).length > 0) {
+                    const app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+                    
+                    loadingState.classList.remove('hidden');
+
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+
+                    // Set up real-time listener for user's goals after authentication
+                    onAuthStateChanged(auth, (user) => {
+                        if (user) {
+                            userId = user.uid;
+                            appIdElement.textContent = appId;
+                            userIdElement.textContent = userId;
+                            
+                            loadingState.classList.add('hidden');
+                            
+                            const goalsCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/goals`);
+                            const q = query(goalsCollectionRef);
+                            onSnapshot(q, (querySnapshot) => {
+                                renderGoalsFromSnapshot(querySnapshot);
+                            }, (error) => {
+                                console.error("Error getting real-time updates: ", error);
+                            });
+                        } else {
+                            // User is signed out.
+                            userId = null;
+                            console.log("User signed out.");
+                        }
                     });
+
                 } else {
-                    emptyState.classList.remove('hidden');
+                    console.error("Firebase config is not available.");
                 }
-                updateProgress();
+            } catch (e) {
+                console.error("Error during Firebase initialization or authentication: ", e);
             }
+        }
 
-            // Event listener for adding a new goal
-            addGoalButton.addEventListener('click', () => {
-                const goalName = newGoalInput.value.trim();
-                if (goalName) {
-                    const newGoal = {
-                        id: Date.now(),
-                        name: goalName,
-                        steps: Array(12).fill().map((_, index) => ({
-                            id: index,
-                            text: `단계 ${index + 1}`,
-                            details: []
-                        }))
-                    };
-                    goals.push(newGoal);
+        // Event listener for adding a new goal
+        addGoalButton.addEventListener('click', async () => {
+            const goalName = newGoalInput.value.trim();
+            if (goalName && userId) {
+                const newGoal = {
+                    name: goalName,
+                    steps: Array(12).fill().map((_, index) => ({
+                        id: index,
+                        text: `단계 ${index + 1}`,
+                        details: []
+                    }))
+                };
+                try {
+                    const goalsCollectionRef = collection(db, `/artifacts/${appId}/users/${userId}/goals`);
+                    await addDoc(goalsCollectionRef, newGoal);
                     newGoalInput.value = '';
-                    renderGoals();
+                } catch (e) {
+                    console.error("Error adding new goal: ", e);
                 }
-            });
-
-            newGoalInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') {
-                    addGoalButton.click();
-                }
-            });
-            
-            // Event listener for motivational quote button
-            getQuoteButton.addEventListener('click', () => {
-                const randomIndex = Math.floor(Math.random() * motivationalQuotes.length);
-                quoteText.textContent = `"${motivationalQuotes[randomIndex]}"`;
-            });
-
-            // Initial render
-            renderGoals();
+            }
         });
+
+        newGoalInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addGoalButton.click();
+            }
+        });
+        
+        // Event listener for motivational quote button
+        getQuoteButton.addEventListener('click', () => {
+            const randomIndex = Math.floor(Math.random() * motivationalQuotes.length);
+            quoteText.textContent = `"${motivationalQuotes[randomIndex]}"`;
+        });
+
+        // Start initialization
+        initializeAppAndAuth();
     </script>
 </body>
 </html>
+
