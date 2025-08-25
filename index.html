@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>나의 목표 달성 앱</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 p-4 sm:p-8 flex items-center justify-center min-h-screen">
+
+    <div class="w-full max-w-4xl bg-white p-6 sm:p-8 rounded-2xl shadow-xl space-y-8">
+        <!-- Header -->
+        <div class="text-center space-y-2">
+            <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-800">나의 목표 달성 앱</h1>
+            <p class="text-lg text-gray-600">목표를 12단계로 나누어 체계적으로 관리해보세요.</p>
+        </div>
+
+        <!-- Dashboard -->
+        <div class="bg-gradient-to-r from-blue-500 to-purple-600 p-6 rounded-xl shadow-lg text-white">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-2xl font-bold">전체 진행 상황</h2>
+                <span id="overall-progress-text" class="text-3xl font-extrabold">0%</span>
+            </div>
+            <div class="h-4 bg-white bg-opacity-30 rounded-full overflow-hidden mb-6">
+                <div id="overall-progress-bar" class="h-full bg-white transition-all duration-500 ease-out" style="width: 0%;"></div>
+            </div>
+            
+            <!-- Individual Goal Progress Bars -->
+            <div id="individual-progress-container" class="space-y-4 pt-4 border-t border-white border-opacity-30 hidden">
+                <h3 class="text-xl font-bold">각 목표별 진행 상황</h3>
+                <div id="individual-progress-list" class="space-y-4"></div>
+            </div>
+        </div>
+
+        <!-- Motivation Section -->
+        <div class="flex flex-col sm:flex-row items-center justify-between bg-yellow-100 p-4 rounded-xl shadow-md">
+            <p id="quote-text" class="italic text-gray-700 text-center sm:text-left mb-2 sm:mb-0">"시작이 반이다. 지금 바로 시작하세요!"</p>
+            <button id="get-quote-button" class="w-full sm:w-auto px-4 py-2 bg-yellow-500 text-white font-bold rounded-lg shadow-md hover:bg-yellow-600 transition-colors">
+                동기 부여 한마디!
+            </button>
+        </div>
+
+        <!-- New Goal Input -->
+        <div class="flex flex-col sm:flex-row space-y-4 sm:space-y-0 sm:space-x-4">
+            <input type="text" id="new-goal-input" class="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors" placeholder="새로운 목표를 입력하세요...">
+            <button id="add-goal-button" class="w-full sm:w-auto px-6 py-3 bg-blue-500 text-white font-bold rounded-lg shadow-md hover:bg-blue-600 transition-colors">
+                목표 추가
+            </button>
+        </div>
+
+        <!-- Goal List -->
+        <div id="goal-list" class="space-y-6">
+            <div id="empty-state" class="text-center text-gray-500 py-10 text-lg">
+                아직 목표가 없습니다. 새로운 목표를 추가해보세요!
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const goals = [];
+            const motivationalQuotes = [
+                "시작이 반이다. 지금 바로 시작하세요!",
+                "목표를 향한 작은 한 걸음이 큰 변화를 만듭니다.",
+                "포기하지 않는 용기만이 목표를 완성시킬 수 있습니다.",
+                "오늘의 노력이 내일의 나를 만듭니다.",
+                "가능하다고 믿으면 절반은 이미 이룬 것이다.",
+            ];
+
+            const overallProgressBar = document.getElementById('overall-progress-bar');
+            const overallProgressText = document.getElementById('overall-progress-text');
+            const individualProgressContainer = document.getElementById('individual-progress-container');
+            const individualProgressList = document.getElementById('individual-progress-list');
+            const goalList = document.getElementById('goal-list');
+            const newGoalInput = document.getElementById('new-goal-input');
+            const addGoalButton = document.getElementById('add-goal-button');
+            const getQuoteButton = document.getElementById('get-quote-button');
+            const quoteText = document.getElementById('quote-text');
+            const emptyState = document.getElementById('empty-state');
+
+            // Function to calculate a single goal's progress
+            function calculateGoalProgress(goal) {
+                const totalDetails = goal.steps.reduce((sum, step) => sum + step.details.length, 0);
+                if (totalDetails === 0) return 0;
+                const completedDetails = goal.steps.reduce((sum, step) =>
+                    sum + step.details.filter(detail => detail.isCompleted).length, 0);
+                return Math.floor((completedDetails / totalDetails) * 100);
+            }
+
+            // Function to update all progress bars
+            function updateProgress() {
+                const totalDetails = goals.reduce((sum, goal) =>
+                    sum + goal.steps.reduce((stepSum, step) => stepSum + step.details.length, 0), 0);
+                const totalCompletedDetails = goals.reduce((sum, goal) =>
+                    sum + goal.steps.reduce((stepSum, step) =>
+                        stepSum + step.details.filter(detail => detail.isCompleted).length, 0), 0);
+                
+                const overallProgress = totalDetails === 0 ? 0 : Math.floor((totalCompletedDetails / totalDetails) * 100);
+                
+                // Update overall progress
+                overallProgressBar.style.width = `${overallProgress}%`;
+                overallProgressText.textContent = `${overallProgress}%`;
+
+                // Update individual progress bars
+                individualProgressList.innerHTML = '';
+                if (goals.length > 0) {
+                    individualProgressContainer.classList.remove('hidden');
+                    goals.forEach(goal => {
+                        const progress = calculateGoalProgress(goal);
+                        const goalProgressHtml = `
+                            <div class="space-y-1">
+                                <div class="flex justify-between items-center text-sm font-medium text-white text-opacity-80">
+                                    <span>${goal.name}</span>
+                                    <span>${progress}%</span>
+                                </div>
+                                <div class="h-2 bg-white bg-opacity-30 rounded-full overflow-hidden">
+                                    <div class="h-full bg-white transition-all duration-500 ease-out" style="width: ${progress}%;"></div>
+                                </div>
+                            </div>
+                        `;
+                        individualProgressList.insertAdjacentHTML('beforeend', goalProgressHtml);
+                    });
+                } else {
+                    individualProgressContainer.classList.add('hidden');
+                }
+            }
+
+            // Function to render a single goal element
+            function renderGoal(goal) {
+                const goalElement = document.createElement('div');
+                goalElement.id = `goal-${goal.id}`;
+                goalElement.className = 'bg-white p-6 rounded-xl shadow-lg border border-gray-200';
+                
+                // Goal Header
+                let goalHeaderHtml = `
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-4">
+                        <h3 class="text-xl font-bold text-gray-800">
+                            목표: ${goal.name}
+                        </h3>
+                        <div class="flex space-x-2 mt-2 sm:mt-0">
+                            <button class="px-3 py-1 text-sm rounded-lg font-semibold transition-colors bg-gray-200 text-gray-700 hover:bg-gray-300 edit-goal-btn">
+                                편집
+                            </button>
+                            <button class="px-3 py-1 text-sm bg-red-500 text-white rounded-lg font-semibold hover:bg-red-600 transition-colors delete-goal-btn">
+                                삭제
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Goal Progress Bar -->
+                    <div class="mb-4">
+                        <div class="flex justify-between items-center text-sm font-medium text-gray-600 mb-1">
+                            <span>진행률</span>
+                            <span>${calculateGoalProgress(goal)}%</span>
+                        </div>
+                        <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+                            <div class="h-full bg-blue-500 transition-all duration-500 ease-out" style="width: ${calculateGoalProgress(goal)}%;"></div>
+                        </div>
+                    </div>
+                    <!-- Steps Section -->
+                    <div class="space-y-4">
+                        <h4 class="text-lg font-semibold text-gray-700">12단계 실행 계획</h4>
+                        <div class="steps-container space-y-4"></div>
+                    </div>
+                `;
+
+                goalElement.innerHTML = goalHeaderHtml;
+                const stepsContainer = goalElement.querySelector('.steps-container');
+
+                // Render steps
+                goal.steps.forEach((step, index) => {
+                    const stepElement = document.createElement('div');
+                    stepElement.className = 'bg-gray-50 p-4 rounded-lg shadow-inner';
+                    stepElement.innerHTML = `
+                        <div class="flex justify-between items-center cursor-pointer step-header">
+                            <h5 class="text-md font-medium text-gray-700">
+                                ${index + 1}. ${step.text}
+                            </h5>
+                            <svg class="w-5 h-5 transition-transform rotate-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </div>
+                        <div class="step-details-container mt-4 space-y-2 border-l-2 border-blue-400 pl-4 hidden">
+                            <p class="text-sm font-semibold text-gray-600">세부 항목</p>
+                            <div class="details-list space-y-2"></div>
+                            <div class="flex mt-2 space-x-2">
+                                <input type="text" class="flex-1 p-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 detail-input" placeholder="새로운 세부 항목을 추가하세요...">
+                                <button class="px-3 py-1 bg-blue-500 text-white rounded-lg font-semibold text-sm hover:bg-blue-600 transition-colors add-detail-btn">
+                                    추가
+                                </button>
+                            </div>
+                        </div>
+                    `;
+
+                    const stepHeader = stepElement.querySelector('.step-header');
+                    const detailsContainer = stepElement.querySelector('.step-details-container');
+                    const detailsList = stepElement.querySelector('.details-list');
+                    const detailInput = stepElement.querySelector('.detail-input');
+                    const addDetailBtn = stepElement.querySelector('.add-detail-btn');
+                    const arrowIcon = stepElement.querySelector('svg');
+                    
+                    // Render details
+                    step.details.forEach(detail => {
+                        const detailElement = document.createElement('div');
+                        detailElement.className = 'flex items-center space-x-2 text-sm';
+                        detailElement.innerHTML = `
+                            <input type="checkbox" ${detail.isCompleted ? 'checked' : ''} class="form-checkbox h-4 w-4 text-blue-500 rounded toggle-detail-checkbox">
+                            <p class="flex-1 ${detail.isCompleted ? 'line-through text-gray-500' : 'text-gray-700'}">${detail.text}</p>
+                        `;
+                        detailsList.appendChild(detailElement);
+                        
+                        // Toggle detail completion status
+                        detailElement.querySelector('.toggle-detail-checkbox').addEventListener('change', () => {
+                            detail.isCompleted = !detail.isCompleted;
+                            renderGoals(); // Rerender all goals
+                        });
+                    });
+
+                    // Event listeners
+                    stepHeader.addEventListener('click', () => {
+                        const isVisible = detailsContainer.classList.toggle('hidden');
+                        arrowIcon.classList.toggle('rotate-180', !isVisible);
+                    });
+
+                    addDetailBtn.addEventListener('click', () => {
+                        if (detailInput.value.trim() !== '') {
+                            step.details.push({
+                                id: Date.now() + Math.random(),
+                                text: detailInput.value.trim(),
+                                isCompleted: false
+                            });
+                            detailInput.value = '';
+                            renderGoals();
+                        }
+                    });
+
+                    stepsContainer.appendChild(stepElement);
+                });
+
+                // Event listeners for goal-level buttons
+                goalElement.querySelector('.edit-goal-btn').addEventListener('click', () => {
+                    alert('편집 기능은 현재 React 버전에서만 구현되어 있습니다.');
+                });
+                goalElement.querySelector('.delete-goal-btn').addEventListener('click', () => {
+                    const goalIndex = goals.findIndex(g => g.id === goal.id);
+                    if (goalIndex !== -1) {
+                        goals.splice(goalIndex, 1);
+                        renderGoals();
+                    }
+                });
+
+                return goalElement;
+            }
+
+            // Main render function
+            function renderGoals() {
+                goalList.innerHTML = '';
+                if (goals.length > 0) {
+                    emptyState.classList.add('hidden');
+                    goals.forEach(goal => {
+                        goalList.appendChild(renderGoal(goal));
+                    });
+                } else {
+                    emptyState.classList.remove('hidden');
+                }
+                updateProgress();
+            }
+
+            // Event listener for adding a new goal
+            addGoalButton.addEventListener('click', () => {
+                const goalName = newGoalInput.value.trim();
+                if (goalName) {
+                    const newGoal = {
+                        id: Date.now(),
+                        name: goalName,
+                        steps: Array(12).fill().map((_, index) => ({
+                            id: index,
+                            text: `단계 ${index + 1}`,
+                            details: []
+                        }))
+                    };
+                    goals.push(newGoal);
+                    newGoalInput.value = '';
+                    renderGoals();
+                }
+            });
+
+            newGoalInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    addGoalButton.click();
+                }
+            });
+            
+            // Event listener for motivational quote button
+            getQuoteButton.addEventListener('click', () => {
+                const randomIndex = Math.floor(Math.random() * motivationalQuotes.length);
+                quoteText.textContent = `"${motivationalQuotes[randomIndex]}"`;
+            });
+
+            // Initial render
+            renderGoals();
+        });
+    </script>
+</body>
+</html>
